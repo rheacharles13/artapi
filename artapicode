@@ -1,0 +1,123 @@
+#include "TFT_eSPI.h"
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Arduino_JSON.h>
+#include <algorithm>
+
+// TODO: replace with your own SSID & Password
+const char* ssid = "Columbia University";
+const char* password = "";
+
+#define BUTTON_LEFT 0
+#define BUTTON_RIGHT 35
+
+volatile bool leftButtonPressed = false;
+volatile bool rightButtonPressed = false;
+
+TFT_eSPI tft = TFT_eSPI();
+
+void setup() {
+  Serial.begin(115200);
+  
+  // setup our display
+  tft.init();
+  tft.setRotation(1);  // 1 = landscape, 2 = portrait
+  tft.fillScreen(TFT_BLACK);
+
+  Serial.print("display dimensions: ");
+  Serial.print(tft.width());
+  Serial.print(" x ");
+  Serial.println(tft.height());
+
+  // connect to wifi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+
+  Serial.print("Connected to WiFi network with IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  // Fetch initial data
+  if (WiFi.status() == WL_CONNECTED) {
+    fetchArtData();
+  } else {
+    Serial.println("WiFi not connected");
+  }
+
+  // setup our buttons
+  pinMode(BUTTON_LEFT, INPUT_PULLUP);
+  pinMode(BUTTON_RIGHT, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_LEFT), pressedLeftButton, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_RIGHT), pressedRightButton, FALLING);
+}
+
+int min(int a, int b) {
+    return (a < b) ? a : b;
+}
+
+void fetchArtData() {
+  HTTPClient http;
+
+  String url = "https://api.artic.edu/api/v1/artworks/search";
+  http.begin(url);
+
+  // Set the content type to JSON
+  http.addHeader("Content-Type", "application/json");
+
+  // JSON data to send in the request
+  String jsonData = "{\"q\":\"cats\",\"query\":{\"term\":{\"is_public_domain\":true}}}";
+
+  // Send the request
+  int httpResponseCode = http.POST(jsonData);
+
+  // Check the response
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.println(response);
+
+    // Display response body as text on the display
+    tft.fillScreen(TFT_BLACK);  // Clear the screen
+    tft.setTextColor(TFT_WHITE);
+    tft.setTextSize(1);         // Adjust text size as needed
+    tft.setCursor(0, 0);        // Start drawing from the top left
+    tft.println("Response:");
+    
+    // Split the response into smaller chunks to fit on the screen
+    int maxLineLength = min(30, tft.width() / 6); // Ensure maxLineLength fits the display width
+    for (int i = 0; i < response.length(); i += maxLineLength) {
+      String line = response.substring(i, min(i + maxLineLength, response.length()));
+      tft.println(line);
+    }
+  } else {
+    Serial.println("Error on sending POST request");
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_RED);
+    tft.setCursor(0, 0);
+    tft.println("Request failed!");
+  }
+
+  // Free resources
+  http.end();
+}
+
+void pressedLeftButton() {
+  leftButtonPressed = true;
+}
+
+void pressedRightButton() {
+  rightButtonPressed = true;
+}
+
+void loop() {
+  // Fetch data when either button is pressed
+  if (leftButtonPressed) {
+    fetchArtData();
+    leftButtonPressed = false;
+  }
+  if (rightButtonPressed) {
+    fetchArtData();
+    rightButtonPressed = false;
+  }
+}
